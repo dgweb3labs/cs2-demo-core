@@ -303,7 +303,7 @@ impl CS2DemoCore {
     /// - `DemoError::Corrupted` - Demo data is corrupted
     /// - `DemoError::EmptyFile` - Demo data is empty
     pub async fn parse_bytes(&self, data: &[u8]) -> Result<DemoEvents> {
-        self.parser.parse_bytes_async(data).await
+        self.parser.parse_bytes_async(data.to_vec()).await
     }
 
     /// Get parser instance for advanced usage
