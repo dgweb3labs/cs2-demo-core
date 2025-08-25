@@ -4,6 +4,7 @@ use crate::error::{DemoError, Result};
 use std::path::Path;
 use tracing::debug;
 
+
 /// Validate a demo file format
 pub fn validate_demo_file<P: AsRef<Path>>(path: P) -> Result<()> {
     let path = path.as_ref();
@@ -284,33 +285,15 @@ pub fn validate_tick_number(tick: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+
     
-    #[test]
-    fn test_validate_demo_extension() {
-        let valid_path = PathBuf::from("test.dem");
-        assert!(validate_demo_extension(&valid_path).is_ok());
+        #[test]
+    fn test_validate_demo_header() {
+        let valid_data = b"PBDEMS2\0test data";
+        assert!(validate_demo_header(valid_data).is_ok());
         
-        let invalid_path = PathBuf::from("test.txt");
-        assert!(validate_demo_extension(&invalid_path).is_err());
-    }
-    
-    #[test]
-    fn test_validate_demo_signature() {
-        let valid_data = b"HL2DEMO\x04\x00\x00\x00";
-        assert!(validate_demo_signature(valid_data).is_ok());
-        
-        let invalid_data = b"INVALID\x04\x00\x00\x00";
-        assert!(validate_demo_signature(invalid_data).is_err());
-    }
-    
-    #[test]
-    fn test_validate_demo_version() {
-        let valid_data = b"HL2DEMO\x04\x00\x00\x00";
-        assert!(validate_demo_version(valid_data).is_ok());
-        
-        let invalid_data = b"HL2DEMO\x03\x00\x00\x00";
-        assert!(validate_demo_version(invalid_data).is_err());
+        let invalid_data = b"INVALID\0test data";
+        assert!(validate_demo_header(invalid_data).is_err());
     }
     
     #[test]

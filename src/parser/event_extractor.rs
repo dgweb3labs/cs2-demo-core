@@ -10,10 +10,13 @@ pub struct EventExtractor {
     /// Current tick
     current_tick: u32,
     /// Players in the current round
+    #[allow(dead_code)]
     players: std::collections::HashMap<u32, Player>,
     /// Kills in current round
+    #[allow(dead_code)]
     round_kills: Vec<Kill>,
     /// Headshots in current round
+    #[allow(dead_code)]
     round_headshots: Vec<Headshot>,
 }
 
@@ -147,6 +150,7 @@ impl EventExtractor {
     }
     
     /// Determine win condition from reason code
+    #[allow(dead_code)]
     fn determine_win_condition(&self, reason: u8) -> crate::events::WinCondition {
         match reason {
             1 => crate::events::WinCondition::Elimination,
@@ -198,6 +202,7 @@ impl EventExtractor {
     }
     
     /// Detect clutch situations (1vX)
+    #[allow(dead_code)]
     fn detect_clutches(&self, _kills: &[Kill], _round: u8) -> Vec<Clutch> {
         let clutches = Vec::new();
         
@@ -211,6 +216,7 @@ impl EventExtractor {
     }
     
     /// Calculate distance between two positions
+    #[allow(dead_code)]
     fn calculate_distance(&self, pos1: &Position, pos2: &Position) -> f32 {
         let dx = pos1.x - pos2.x;
         let dy = pos1.y - pos2.y;

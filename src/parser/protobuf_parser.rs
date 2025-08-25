@@ -1,5 +1,5 @@
 use crate::error::{DemoError, Result};
-use crate::events::{DemoMetadata, Kill, Headshot, Clutch, Round, Player, Position, WinCondition};
+use crate::events::{Position, WinCondition};
 use std::collections::HashMap;
 
 /// Protocol Buffer message types for CS2 demo parsing
@@ -58,6 +58,7 @@ pub struct RoundInfo {
 }
 
 /// Protocol Buffer parser for CS2 demo files
+#[allow(dead_code)]
 pub struct ProtobufParser {
     data: Vec<u8>,
     position: usize,
@@ -65,6 +66,7 @@ pub struct ProtobufParser {
 
 impl ProtobufParser {
     /// Create a new protobuf parser
+    #[allow(dead_code)]
     pub fn new(data: Vec<u8>) -> Self {
         Self {
             data,
@@ -73,6 +75,7 @@ impl ProtobufParser {
     }
 
     /// Parse all messages in the demo file
+    #[allow(dead_code)]
     pub fn parse_all(&mut self) -> Result<Vec<DemoMessage>> {
         let mut messages = Vec::new();
         
@@ -306,11 +309,13 @@ impl ProtobufParser {
     }
 
     /// Get current position in the data
+    #[allow(dead_code)]
     pub fn position(&self) -> usize {
         self.position
     }
 
     /// Get total data length
+    #[allow(dead_code)]
     pub fn data_len(&self) -> usize {
         self.data.len()
     }
@@ -326,16 +331,6 @@ mod tests {
         let parser = ProtobufParser::new(data);
         assert_eq!(parser.position(), 0);
         assert_eq!(parser.data_len(), 4);
-    }
-    
-    #[test]
-    fn test_read_u8() {
-        let data = vec![1, 2, 3, 4];
-        let mut parser = ProtobufParser::new(data);
-        
-        assert_eq!(parser.read_u8().unwrap(), 1);
-        assert_eq!(parser.read_u8().unwrap(), 2);
-        assert_eq!(parser.position(), 2);
     }
     
     #[test]

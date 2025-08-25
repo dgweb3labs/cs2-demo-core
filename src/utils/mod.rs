@@ -118,7 +118,7 @@ impl DemoUtils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+
     
     #[test]
     fn test_format_file_size() {

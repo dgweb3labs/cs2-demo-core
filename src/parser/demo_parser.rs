@@ -1,10 +1,10 @@
 use crate::error::{DemoError, Result};
-use crate::events::{DemoEvents, DemoMetadata, Kill, Headshot, Clutch, Round, Player, Position, WinCondition, MatchStats};
+use crate::events::{DemoEvents, DemoMetadata, Kill, Headshot, Round, Player, WinCondition, MatchStats};
 use crate::parser::protobuf_parser::{ProtobufParser, DemoMessage, DemoHeader, GameEvent, PlayerInfo, RoundInfo};
 use crate::parser::event_extractor::EventExtractor;
 use crate::utils::validation::validate_demo_file;
 use std::path::Path;
-use std::collections::HashMap;
+
 
 /// Options for demo parsing
 #[derive(Debug, Clone)]
@@ -32,6 +32,7 @@ impl Default for ParseOptions {
 
 /// Main CS2 demo parser
 pub struct CS2Parser {
+    #[allow(dead_code)]
     options: ParseOptions,
 }
 
@@ -70,7 +71,7 @@ impl CS2Parser {
         let options = self.options.clone();
         
         tokio::task::spawn_blocking(move || {
-            let mut parser = CS2Parser::with_options(options);
+            let parser = CS2Parser::with_options(options);
             parser.parse_bytes_sync(data)
         }).await
             .map_err(|e| DemoError::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("Task join error: {}", e))))?
@@ -131,7 +132,7 @@ impl CS2Parser {
     }
 
     /// Process a game event
-    fn process_game_event(&self, extractor: &mut EventExtractor, events: &mut DemoEvents, game_event: GameEvent) -> Result<()> {
+    fn process_game_event(&self, _extractor: &mut EventExtractor, events: &mut DemoEvents, game_event: GameEvent) -> Result<()> {
         // Extract kills from game events
         if let Some(kill_data) = game_event.data.get("kill") {
             if let Ok(kill) = self.parse_kill_event(kill_data, game_event.timestamp) {
@@ -160,7 +161,7 @@ impl CS2Parser {
     }
 
     /// Process player information
-    fn process_player_info(&self, extractor: &mut EventExtractor, events: &mut DemoEvents, player_info: PlayerInfo) -> Result<()> {
+    fn process_player_info(&self, _extractor: &mut EventExtractor, events: &mut DemoEvents, player_info: PlayerInfo) -> Result<()> {
         let player_name = player_info.name.clone();
         let player = Player {
             name: player_name.clone(),
@@ -179,7 +180,7 @@ impl CS2Parser {
     }
 
     /// Process round information
-    fn process_round_info(&self, extractor: &mut EventExtractor, events: &mut DemoEvents, round_info: RoundInfo) -> Result<()> {
+    fn process_round_info(&self, _extractor: &mut EventExtractor, events: &mut DemoEvents, round_info: RoundInfo) -> Result<()> {
         let round = Round {
             number: round_info.round_number as u8,
             winner: match round_info.winner {
@@ -205,7 +206,7 @@ impl CS2Parser {
     }
 
     /// Parse a kill event from game event data
-    fn parse_kill_event(&self, kill_data: &str, timestamp: f32) -> Result<Kill> {
+    fn parse_kill_event(&self, _kill_data: &str, timestamp: f32) -> Result<Kill> {
         // TODO: Implement real kill event parsing
         // For now, return a placeholder
         Ok(Kill {
@@ -227,13 +228,13 @@ impl CS2Parser {
         let total_headshots = events.headshots.len() as u32;
         let total_rounds = events.rounds.len() as u32;
         
-        let headshot_percentage = if total_kills > 0 {
+        let _headshot_percentage = if total_kills > 0 {
             (total_headshots as f32 / total_kills as f32) * 100.0
         } else {
             0.0
         };
         
-        let avg_round_duration = if total_rounds > 0 {
+        let _avg_round_duration = if total_rounds > 0 {
             events.rounds.iter()
                 .map(|r| r.duration)
                 .sum::<f32>() / total_rounds as f32
