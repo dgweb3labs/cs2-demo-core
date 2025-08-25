@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::events::{DemoEvents, Kill, Headshot, Clutch, Round, Player, Position};
+use crate::events::{DemoEvents, Kill, Headshot, Clutch, Round, Player, Position, WinCondition};
 use crate::parser::protobuf_parser::{DemoMessage, GameEvent, PlayerInfo, RoundInfo};
 use tracing::{debug, info};
 
@@ -43,14 +43,14 @@ impl EventExtractor {
                 DemoMessage::GameEvent(game_event) => {
                     self.extract_game_event(&game_event, &mut events)?;
                 }
-                DemoMessage::Player(player_info) => {
+                DemoMessage::PlayerInfo(player_info) => {
                     self.extract_player_info(&player_info, &mut events)?;
                 }
-                DemoMessage::Round(round_info) => {
+                DemoMessage::RoundInfo(round_info) => {
                     self.extract_round_info(&round_info, &mut events)?;
                 }
-                DemoMessage::Unknown(data) => {
-                    debug!("Skipping unknown message of {} bytes", data.len());
+                DemoMessage::Unknown { field_id, data } => {
+                    debug!("Skipping unknown message field {} with {} bytes", field_id, data.len());
                 }
             }
         }
@@ -69,8 +69,8 @@ impl EventExtractor {
         events.metadata.version = header.version.to_string();
         events.metadata.map = header.map_name.clone();
         events.metadata.server = header.server_name.clone();
-        events.metadata.duration = header.playback_time as f32;
-        events.metadata.ticks = header.playback_ticks;
+        events.metadata.duration = header.duration;
+        events.metadata.ticks = header.tick_count;
         
         debug!("Extracted metadata: map={}, duration={}s, ticks={}", 
                events.metadata.map, events.metadata.duration, events.metadata.ticks);
@@ -80,7 +80,7 @@ impl EventExtractor {
     
     /// Extract game events
     fn extract_game_event(&mut self, game_event: &GameEvent, _events: &mut DemoEvents) -> Result<()> {
-        self.current_tick = game_event.tick;
+        self.current_tick = game_event.timestamp as u32;
         
         // TODO: Implement actual game event parsing
         // This would involve parsing the protobuf data to extract:
@@ -98,7 +98,7 @@ impl EventExtractor {
     fn extract_player_info(&self, player_info: &PlayerInfo, events: &mut DemoEvents) -> Result<()> {
         let player = Player {
             name: player_info.name.clone(),
-            steam_id: Some(player_info.guid.clone()),
+            steam_id: Some(player_info.steam_id.to_string()),
             team: String::new(), // Will be determined from game events
             kills: 0,
             deaths: 0,
@@ -117,27 +117,31 @@ impl EventExtractor {
     
     /// Extract round information
     fn extract_round_info(&mut self, round_info: &RoundInfo, events: &mut DemoEvents) -> Result<()> {
-        self.current_round = round_info.round_number;
+        self.current_round = round_info.round_number as u8;
         
         let round = Round {
-            number: round_info.round_number,
+            number: round_info.round_number as u8,
             winner: match round_info.winner {
-                2 => "T".to_string(),
-                3 => "CT".to_string(),
-                _ => "Unknown".to_string(),
+                WinCondition::Elimination => "T".to_string(),
+                WinCondition::BombExploded => "T".to_string(),
+                WinCondition::BombDefused => "CT".to_string(),
+                WinCondition::TimeExpired => "Unknown".to_string(),
+                WinCondition::TargetSaved => "CT".to_string(),
+                WinCondition::HostageRescued => "CT".to_string(),
+                WinCondition::Unknown => "Unknown".to_string(),
             },
             t_score: 0, // Will be calculated from kills
             ct_score: 0, // Will be calculated from kills
-            duration: round_info.duration,
+            duration: round_info.end_time - round_info.start_time,
             start_tick: self.current_tick,
             end_tick: self.current_tick,
-            win_condition: self.determine_win_condition(round_info.reason),
+            win_condition: round_info.winner.clone(),
         };
         
         events.rounds.push(round.clone());
         
         debug!("Extracted round {}: winner={}, duration={}s", 
-               round_info.round_number, round.winner, round_info.duration);
+               round_info.round_number, round.winner, round_info.end_time - round_info.start_time);
         
         Ok(())
     }

@@ -1,225 +1,262 @@
 use crate::error::{DemoError, Result};
+use crate::events::{DemoMetadata, Kill, Headshot, Clutch, Round, Player, Position, WinCondition};
+use std::collections::HashMap;
 
-use tracing::{debug, warn};
-
-/// Protobuf message types for CS2 demos
-#[derive(Debug)]
+/// Protocol Buffer message types for CS2 demo parsing
+#[derive(Debug, Clone)]
 pub enum DemoMessage {
-    /// Demo header information
     Header(DemoHeader),
-    /// Game event
     GameEvent(GameEvent),
-    /// Player information
-    Player(PlayerInfo),
-    /// Round information
-    Round(RoundInfo),
-    /// Unknown message type
-    Unknown(Vec<u8>),
+    PlayerInfo(PlayerInfo),
+    RoundInfo(RoundInfo),
+    Unknown { field_id: u32, data: Vec<u8> },
 }
 
-/// Demo header structure
+/// Demo file header information
 #[derive(Debug, Clone)]
 pub struct DemoHeader {
+    pub signature: String,
     pub version: u32,
-    pub protocol: u32,
-    pub server_name: String,
-    pub client_name: String,
     pub map_name: String,
-    pub game_directory: String,
-    pub playback_time: f32,
-    pub playback_ticks: u32,
-    pub playback_frames: u32,
-    pub signon_length: u32,
+    pub server_name: String,
+    pub player_count: u32,
+    pub tick_count: u32,
+    pub duration: f32,
 }
 
-/// Game event structure
+/// Game event information
 #[derive(Debug, Clone)]
 pub struct GameEvent {
-    pub event_id: u32,
-    pub tick: u32,
-    pub data: Vec<u8>,
+    pub event_type: u32,
+    pub timestamp: f32,
+    pub data: HashMap<String, String>,
 }
 
 /// Player information
 #[derive(Debug, Clone)]
 pub struct PlayerInfo {
-    pub user_id: u32,
+    pub steam_id: u64,
     pub name: String,
-    pub guid: String,
-    pub friends_id: u32,
-    pub friends_name: String,
-    pub fake_player: bool,
-    pub hltv: bool,
-    pub custom_files: Vec<u32>,
-    pub files_downloaded: u8,
+    pub team: u32,
+    pub position: Position,
+    pub health: u32,
+    pub armor: u32,
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
 }
 
 /// Round information
 #[derive(Debug, Clone)]
 pub struct RoundInfo {
-    pub round_number: u8,
-    pub winner: u8,
-    pub reason: u8,
-    pub duration: f32,
+    pub round_number: u32,
+    pub start_time: f32,
+    pub end_time: f32,
+    pub winner: WinCondition,
+    pub t_score: u32,
+    pub ct_score: u32,
 }
 
-/// Protobuf parser for CS2 demo files
+/// Protocol Buffer parser for CS2 demo files
 pub struct ProtobufParser {
-    /// Current position in the demo file
-    position: usize,
-    /// Demo data
     data: Vec<u8>,
+    position: usize,
 }
 
 impl ProtobufParser {
     /// Create a new protobuf parser
     pub fn new(data: Vec<u8>) -> Self {
         Self {
-            position: 0,
             data,
+            position: 0,
         }
     }
-    
-    /// Parse all messages in the demo
+
+    /// Parse all messages in the demo file
     pub fn parse_all(&mut self) -> Result<Vec<DemoMessage>> {
         let mut messages = Vec::new();
         
+        // Check for PBDEMS2 signature
+        if !self.check_signature()? {
+            return Err(DemoError::invalid_format("Missing PBDEMS2 signature"));
+        }
+
+        // Skip header and parse messages
+        self.skip_header()?;
+        
         while self.position < self.data.len() {
-            match self.parse_next_message() {
-                Ok(Some(message)) => {
-                    messages.push(message);
-                }
-                Ok(None) => {
-                    // End of messages
-                    break;
-                }
-                Err(e) => {
-                    warn!("Error parsing message at position {}: {:?}", self.position, e);
-                    // Continue parsing other messages
-                    continue;
-                }
+            if let Some(message) = self.parse_next_message()? {
+                messages.push(message);
+            } else {
+                break;
             }
         }
-        
-        debug!("Parsed {} messages from demo", messages.len());
+
         Ok(messages)
     }
-    
-    /// Parse the next message in the demo
+
+    /// Parse the next message in the stream
     pub fn parse_next_message(&mut self) -> Result<Option<DemoMessage>> {
         if self.position >= self.data.len() {
             return Ok(None);
         }
-        
-        // Read message type
-        let message_type = self.read_u8()?;
-        
-        // Read message length
-        let message_length = self.read_u32()?;
-        
-        if message_length == 0 {
-            return Ok(None);
-        }
-        
-        // Check if we have enough data
-        if self.position + message_length as usize > self.data.len() {
-            return Err(DemoError::corrupted("Message length exceeds available data"));
-        }
-        
-        // Read message data
-        let message_data = &self.data[self.position..self.position + message_length as usize];
-        self.position += message_length as usize;
-        
-        // Parse message based on type
-        let message = match message_type {
-            1 => self.parse_header(message_data)?,
-            2 => self.parse_game_event(message_data)?,
-            3 => self.parse_player_info(message_data)?,
-            4 => self.parse_round_info(message_data)?,
+
+        // Read field header (protobuf wire format)
+        let field_header = self.read_varint()?;
+        let field_id = field_header >> 3;
+        let wire_type = field_header & 0x07;
+
+        match wire_type {
+            0 => { // Varint
+                let value = self.read_varint()?;
+                Ok(Some(self.create_message_from_field(field_id, value)?))
+            },
+            1 => { // 64-bit
+                let value = self.read_u64()?;
+                Ok(Some(self.create_message_from_field(field_id, value)?))
+            },
+            2 => { // Length-delimited
+                let length = self.read_varint()? as usize;
+                let data = self.read_bytes(length)?;
+                Ok(Some(self.create_message_from_field(field_id, data)?))
+            },
+            5 => { // 32-bit
+                let value = self.read_u32()?;
+                Ok(Some(self.create_message_from_field(field_id, value)?))
+            },
             _ => {
-                debug!("Unknown message type: {}", message_type);
-                DemoMessage::Unknown(message_data.to_vec())
+                // Skip unknown wire types
+                self.position += 1;
+                Ok(None)
             }
-        };
-        
-        Ok(Some(message))
+        }
     }
-    
-    /// Parse demo header
-    fn parse_header(&self, _data: &[u8]) -> Result<DemoMessage> {
-        // TODO: Implement actual protobuf parsing for header
-        // For now, return a placeholder
-        let header = DemoHeader {
-            version: 4,
-            protocol: 0,
-            server_name: String::new(),
-            client_name: String::new(),
-            map_name: String::new(),
-            game_directory: String::new(),
-            playback_time: 0.0,
-            playback_ticks: 0,
-            playback_frames: 0,
-            signon_length: 0,
-        };
-        
-        Ok(DemoMessage::Header(header))
-    }
-    
-    /// Parse game event
-    fn parse_game_event(&self, data: &[u8]) -> Result<DemoMessage> {
-        // TODO: Implement actual protobuf parsing for game events
-        let event = GameEvent {
-            event_id: 0,
-            tick: 0,
-            data: data.to_vec(),
-        };
-        
-        Ok(DemoMessage::GameEvent(event))
-    }
-    
-    /// Parse player info
-    fn parse_player_info(&self, _data: &[u8]) -> Result<DemoMessage> {
-        // TODO: Implement actual protobuf parsing for player info
-        let player = PlayerInfo {
-            user_id: 0,
-            name: String::new(),
-            guid: String::new(),
-            friends_id: 0,
-            friends_name: String::new(),
-            fake_player: false,
-            hltv: false,
-            custom_files: Vec::new(),
-            files_downloaded: 0,
-        };
-        
-        Ok(DemoMessage::Player(player))
-    }
-    
-    /// Parse round info
-    fn parse_round_info(&self, _data: &[u8]) -> Result<DemoMessage> {
-        // TODO: Implement actual protobuf parsing for round info
-        let round = RoundInfo {
-            round_number: 0,
-            winner: 0,
-            reason: 0,
-            duration: 0.0,
-        };
-        
-        Ok(DemoMessage::Round(round))
-    }
-    
-    /// Read a single byte
-    fn read_u8(&mut self) -> Result<u8> {
-        if self.position >= self.data.len() {
-            return Err(DemoError::corrupted("Unexpected end of data"));
+
+    /// Check if the file has the correct PBDEMS2 signature
+    fn check_signature(&self) -> Result<bool> {
+        if self.data.len() < 8 {
+            return Ok(false);
         }
         
-        let value = self.data[self.position];
-        self.position += 1;
-        Ok(value)
+        let signature = &self.data[0..8];
+        let expected = b"PBDEMS2\0";
+        
+        Ok(signature == expected)
     }
-    
-    /// Read a 32-bit integer
+
+    /// Skip the demo header section
+    fn skip_header(&mut self) -> Result<()> {
+        // Skip signature (8 bytes)
+        self.position = 8;
+        
+        // Skip version and other header fields
+        // Look for the first protobuf message
+        while self.position < self.data.len() {
+            if self.data[self.position] & 0x07 == 2 { // Length-delimited field
+                break;
+            }
+            self.position += 1;
+        }
+        
+        Ok(())
+    }
+
+    /// Create a message from a protobuf field
+    fn create_message_from_field(&self, field_id: u32, value: impl std::fmt::Debug) -> Result<DemoMessage> {
+        match field_id {
+            1 => Ok(DemoMessage::Header(self.parse_header_field(value)?)),
+            2 => Ok(DemoMessage::GameEvent(self.parse_game_event_field(value)?)),
+            3 => Ok(DemoMessage::PlayerInfo(self.parse_player_info_field(value)?)),
+            4 => Ok(DemoMessage::RoundInfo(self.parse_round_info_field(value)?)),
+            _ => Ok(DemoMessage::Unknown { 
+                field_id, 
+                data: format!("{:?}", value).into_bytes() 
+            }),
+        }
+    }
+
+    /// Parse header field
+    fn parse_header_field(&self, _value: impl std::fmt::Debug) -> Result<DemoHeader> {
+        // TODO: Implement real header parsing
+        Ok(DemoHeader {
+            signature: "PBDEMS2".to_string(),
+            version: 2,
+            map_name: "de_ancient".to_string(),
+            server_name: "SourceTV".to_string(),
+            player_count: 10,
+            tick_count: 0,
+            duration: 0.0,
+        })
+    }
+
+    /// Parse game event field
+    fn parse_game_event_field(&self, _value: impl std::fmt::Debug) -> Result<GameEvent> {
+        // TODO: Implement real game event parsing
+        Ok(GameEvent {
+            event_type: 0,
+            timestamp: 0.0,
+            data: HashMap::new(),
+        })
+    }
+
+    /// Parse player info field
+    fn parse_player_info_field(&self, _value: impl std::fmt::Debug) -> Result<PlayerInfo> {
+        // TODO: Implement real player info parsing
+        Ok(PlayerInfo {
+            steam_id: 0,
+            name: "Player".to_string(),
+            team: 0,
+            position: Position { x: 0.0, y: 0.0, z: 0.0 },
+            health: 100,
+            armor: 0,
+            kills: 0,
+            deaths: 0,
+            assists: 0,
+        })
+    }
+
+    /// Parse round info field
+    fn parse_round_info_field(&self, _value: impl std::fmt::Debug) -> Result<RoundInfo> {
+        // TODO: Implement real round info parsing
+        Ok(RoundInfo {
+            round_number: 1,
+            start_time: 0.0,
+            end_time: 0.0,
+            winner: WinCondition::Unknown,
+            t_score: 0,
+            ct_score: 0,
+        })
+    }
+
+    /// Read a varint from the current position
+    fn read_varint(&mut self) -> Result<u32> {
+        let mut result = 0u32;
+        let mut shift = 0;
+        
+        loop {
+            if self.position >= self.data.len() {
+                return Err(DemoError::corrupted("Unexpected end of data"));
+            }
+            
+            let byte = self.data[self.position];
+            self.position += 1;
+            
+            result |= ((byte & 0x7F) as u32) << shift;
+            
+            if (byte & 0x80) == 0 {
+                break;
+            }
+            
+            shift += 7;
+            if shift >= 32 {
+                return Err(DemoError::invalid_format("Varint too large"));
+            }
+        }
+        
+        Ok(result)
+    }
+
+    /// Read a u32 from the current position
     fn read_u32(&mut self) -> Result<u32> {
         if self.position + 4 > self.data.len() {
             return Err(DemoError::corrupted("Unexpected end of data"));
@@ -235,12 +272,44 @@ impl ProtobufParser {
         self.position += 4;
         Ok(value)
     }
-    
-    /// Get current position
+
+    /// Read a u64 from the current position
+    fn read_u64(&mut self) -> Result<u64> {
+        if self.position + 8 > self.data.len() {
+            return Err(DemoError::corrupted("Unexpected end of data"));
+        }
+        
+        let value = u64::from_le_bytes([
+            self.data[self.position],
+            self.data[self.position + 1],
+            self.data[self.position + 2],
+            self.data[self.position + 3],
+            self.data[self.position + 4],
+            self.data[self.position + 5],
+            self.data[self.position + 6],
+            self.data[self.position + 7],
+        ]);
+        
+        self.position += 8;
+        Ok(value)
+    }
+
+    /// Read bytes from the current position
+    fn read_bytes(&mut self, length: usize) -> Result<Vec<u8>> {
+        if self.position + length > self.data.len() {
+            return Err(DemoError::corrupted("Unexpected end of data"));
+        }
+        
+        let data = self.data[self.position..self.position + length].to_vec();
+        self.position += length;
+        Ok(data)
+    }
+
+    /// Get current position in the data
     pub fn position(&self) -> usize {
         self.position
     }
-    
+
     /// Get total data length
     pub fn data_len(&self) -> usize {
         self.data.len()
