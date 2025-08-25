@@ -1,0 +1,60 @@
+[package]
+name = "cs2-demo-core"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance CS2 demo parser for extracting game events"
+license = "MIT"
+repository = "https://github.com/dgweb3labs/cs2-demo-core"
+homepage = "https://github.com/dgweb3labs/cs2-demo-core"
+documentation = "https://docs.rs/cs2-demo-core"
+keywords = ["cs2", "demo", "parser", "gaming", "highlights", "events"]
+categories = ["multimedia", "parsing"]
+authors = ["DG Web3 Labs <contact@dgservices.com>"]
+
+[dependencies]
+# Core parsing
+protobuf = "3.4"
+byteorder = "1.5"
+thiserror = "1.0"
+
+# Async and performance
+tokio = { version = "1.0", features = ["full"] }
+rayon = "1.8"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# CLI and utilities
+clap = { version = "4.0", features = ["derive"], optional = true }
+indicatif = { version = "0.17", optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+tokio-test = "0.4"
+
+[[bench]]
+name = "demo_parsing"
+harness = false
+
+[features]
+default = ["cli"]
+cli = ["clap", "indicatif"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.crates-io]
+repository = "https://github.com/dgweb3labs/cs2-demo-core"
+documentation = "https://docs.rs/cs2-demo-core"
+homepage = "https://github.com/dgweb3labs/cs2-demo-core"
+readme = "README.md"
+license = "MIT"
+keywords = ["cs2", "demo", "parser", "gaming", "highlights", "events"]
+categories = ["multimedia", "parsing"]
